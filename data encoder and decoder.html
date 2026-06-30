@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom Data Processing & Archive Studio</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-bg: #1e293b;
+            --accent-blue: #38bdf8;
+            --accent-purple: #a855f7;
+            --status-green: #10b981;
+            --status-amber: #f59e0b;
+            --status-red: #ef4444;
+            --base-white: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark); color: var(--base-white);
+            margin: 0; padding: 20px; display: flex; flex-direction: column; align-items: center;
+        }
+
+        h1 { color: var(--accent-blue); margin-bottom: 5px; }
+        p.subtitle { color: var(--text-muted); margin-bottom: 25px; text-align: center; }
+
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+
+        .tab-btn {
+            background-color: var(--panel-bg); color: var(--base-white); border: 2px solid #334155;
+            padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.3s;
+        }
+
+        .tab-btn.active { background-color: var(--accent-blue); color: var(--bg-dark); border-color: var(--accent-blue); }
+
+        .container { width: 100%; max-width: 1450px; display: grid; grid-template-columns: 1fr 1.2fr; gap: 20px; }
+
+        @media (max-width: 1100px) { .container { grid-template-columns: 1fr; } }
+
+        .panel { background-color: var(--panel-bg); padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; gap: 15px; }
+
+        textarea, input[type="text"] { width: 100%; background-color: var(--bg-dark); color: var(--base-white); border: 1px solid #334155; border-radius: 6px; padding: 10px; box-sizing: border-box; font-family: monospace; }
+        textarea { height: 75px; resize: none; }
+        input[type="text"] { height: 40px; font-size: 14px; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+
+        .stat-card { background-color: #151f32; padding: 15px; border-radius: 8px; border-left: 4px solid var(--accent-blue); }
+        .stat-card.alternative { border-left-color: var(--status-amber); }
+        .stat-card.security { border-left-color: var(--status-red); }
+        .stat-card .val { font-size: 20px; font-weight: bold; margin-top: 5px; }
+        .stat-card .pct { font-size: 13px; color: var(--text-muted); font-weight: bold; }
+
+        .file-input-container { border: 2px dashed #475569; padding: 20px; text-align: center; border-radius: 8px; cursor: pointer; background-color: #151f32; transition: 0.2s; }
+        .file-input-container:hover { border-color: var(--accent-blue); }
+
+        .preview-img { max-width: 100%; max-height: 100px; margin-top: 10px; border-radius: 6px; display: none; }
+
+        .output-box { background-color: var(--bg-dark); padding: 12px; border-radius: 6px; font-family: monospace; font-size: 13px; word-break: break-all; max-height: 90px; overflow-y: auto; border: 1px solid #334155; color: #10b981; font-weight: bold; }
+        .output-box.decoded-res { color: var(--accent-blue); max-height: 110px; }
+        
+        .log-terminal-box { background-color: #0b1329; padding: 15px; border-radius: 8px; font-size: 13px; border: 1px solid #1e293b; max-height: 140px; overflow-y: auto; line-height: 1.6; }
+        .log-terminal-box h4 { margin-top: 0; margin-bottom: 8px; color: var(--accent-purple); text-transform: uppercase; letter-spacing: 0.5px; }
+        .log-step-line { margin-bottom: 6px; font-family: monospace; color: #cbd5e1; }
+
+        .btn-action { background-color: var(--status-green); color: white; border: none; padding: 12px; width: 100%; border-radius: 6px; font-weight: bold; font-size: 15px; cursor: pointer; transition: 0.2s; }
+        .btn-action:hover { opacity: 0.9; }
+
+        .table-container { max-height: 110px; overflow-y: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+        th, td { padding: 6px 8px; border-bottom: 1px solid #334155; text-align: left; }
+        th { color: var(--accent-blue); background-color: #151f32; position: sticky; top: 0; }
+
+        .tree-container { 
+            display: block; 
+            overflow: auto; 
+            min-height: 550px; 
+            max-height: 700px;
+            background: #0b111e; 
+            border-radius: 8px; 
+            box-sizing: border-box;
+            padding: 40px;
+            cursor: grab;
+            user-select: none;
+            position: relative;
+        }
+        
+        .tree-container:active { cursor: grabbing; }
+        .tree { display: inline-block; white-space: nowrap; margin: 0 auto; padding: 0; list-style: none; text-align: center; }
+        .tree ul { position: relative; padding-top: 20px; display: flex; justify-content: center; align-items: flex-start; margin: 0; padding-left: 0; list-style: none; }
+        .tree ul::before { content: ''; position: absolute; top: 0; left: 50%; border-left: 2px solid #475569; height: 20px; transform: translateX(-50%); }
+        .tree li { position: relative; padding: 20px 10px 0 10px; display: flex; flex-direction: column; align-items: center; }
+        .tree li::before, .tree li::after { content: ''; position: absolute; top: 0; right: 50%; border-top: 2px solid #475569; width: 50%; height: 20px; }
+        .tree li::after { right: auto; left: 50%; border-left: 2px solid #475569; }
+        .tree > li { padding-top: 10px; }
+        .tree > li::before, .tree > li::after { display: none !important; }
+        .tree li:only-child::after, .tree li:only-child::before { display: none; }
+        .tree li:only-child { padding-top: 0; }
+        .tree li:first-child::before, .tree li:last-child::after { border: 0 none; }
+        .tree li:last-child::before { border-right: 2px solid #475569; border-radius: 0 5px 0 0; }
+        .tree li:first-child::after { border-radius: 5px 0 0 0; }
+
+        .node { background: linear-gradient(135deg, #1e293b, #334155); border: 2px solid #475569; color: var(--base-white); padding: 8px 12px; border-radius: 6px; min-width: 65px; text-align: center; font-size: 11px; z-index: 5; display: inline-block; }
+        .node.leaf { border-color: var(--accent-purple); background: linear-gradient(135deg, #2e1065, #4c1d95); }
+        .node .label { font-size: 11px; color: var(--text-muted); font-weight: bold; }
+        .node .freq { font-size: 11px; color: var(--accent-blue); font-weight: bold; margin-top: 2px; }
+        .edge-label { font-size: 11px; color: var(--text-muted); font-weight: bold; margin-bottom: -12px; z-index: 10; background: #0b111e; padding: 0 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+    <h1>Data Processor Dashboard</h1>
+    <p class="subtitle">Binary Streams Optimization Analyzer & Custom Tree Schema Extraction Workspace</p>
+
+    <div class="tabs">
+        <button class="tab-btn active" onclick="toggleMainWorkspace('encoder')">📝 Data Encoder Studio</button>
+        <button class="tab-btn" onclick="toggleMainWorkspace('decoder')">🔓 Archive Decoder Engine</button>
+    </div>
+
+    <div class="container">
+        <div class="panel">
+            
+            <div id="encoderSection" class="input-area" style="display:block;">
+                <h3>Choose Data Source Type</h3>
+                <div style="display:flex; gap:15px; margin-bottom:12px;">
+                    <label><input type="radio" name="srcType" id="radioText" checked onclick="toggleEncoderSource('text')"> Interactive Text String</label>
+                    <label><input type="radio" name="srcType" id="radioImage" onclick="toggleEncoderSource('image')"> Image Grayscale Sample</label>
+                </div>
+
+                <div id="encoderTextSource">
+                    <h3>Input Raw Data Array Sequence</h3>
+                    <textarea id="textInput" oninput="runEncoderPipeline()">BCAAA</textarea>
+                </div>
+
+                <div id="encoderImageSource" style="display:none;">
+                    <h3>Upload Matrix Graphic Asset</h3>
+                    <div class="file-input-container" onclick="document.getElementById('imageInput').click()">
+                        <span id="imgStatusText">Click here to upload source image</span>
+                        <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="runImageMatrixExtractor()">
+                        <br><img id="imagePreview" class="preview-img" alt="Thumbnail Preview">
+                    </div>
+                </div>
+
+                <div style="font-size: 13px; color: var(--text-muted); margin-top:10px;">
+                    Raw Uncompressed Footprint: <span id="origSize" style="color: var(--base-white); font-weight: bold;">0</span> bits
+                </div>
+                
+                <div class="stats-grid" style="margin-top:10px;">
+                    <div class="stat-card">
+                        <div style="color: var(--accent-blue); font-weight: bold; font-size: 12px;">Tree Footprint</div>
+                        <div class="val" id="treeBitsSize">0 bits</div>
+                        <div class="pct" id="treeBitsRatio">Saved 0%</div>
+                    </div>
+                    <div class="stat-card alternative">
+                        <div style="color: var(--status-amber); font-weight: bold; font-size: 12px;">Sequential Limits</div>
+                        <div class="val" id="seqBitsSize">0 bits</div>
+                        <div class="pct" id="seqBitsRatio">Saved 0%</div>
+                    </div>
+                </div>
+
+                <h3>💾 Auto-Generated Compressed Binary Stream Target</h3>
+                <div class="output-box" id="finalBinaryOutputStream">0001111</div>
+                
+                <button class="btn-action" style="background-color: var(--accent-purple); margin-top: 10px;" 
+                        onclick="exportCurrentWorkAsZip()">📦 Export Current Archive (.zip)</button>
+            </div>
+
+            <div id="decoderSection" class="input-area" style="display:none;">
+                <h3>📂 Upload ANY Standard ZIP Archive File Package</h3>
+                <div class="file-input-container" onclick="document.getElementById('zipInput').click()" style="border-color: var(--accent-purple); background-color: #121b2d; padding: 18px;">
+                    <span id="zipStatusText" style="color: var(--accent-purple); font-weight: bold;">Click here to load any local archive file asset</span>
+                    <input type="file" id="zipInput" accept=".zip" style="display:none" onchange="unpackArchiveHandler()">
+                </div>
+
+                <div style="text-align: center; color: var(--text-muted); font-size: 12px; margin: 8px 0; font-weight: bold;">— SYSTEM CUSTOM OVERRIDES CONTROL INTERFACES —</div>
+
+                <div style="margin-bottom: 10px;">
+                    <label style="font-size: 12px; color: var(--text-muted);">Compressed Bitstream Input Pipeline Array:</label>
+                    <input type="text" id="decoderBitstreamInput" value="0001111" placeholder="Bits stream array sequence e.g., 01010011">
+                </div>
+
+                <div>
+                    <label style="font-size: 12px; color: var(--text-muted);">Prefix Configuration Schema Mapping Dictionary Data:</label>
+                    <textarea id="decoderJsonMapInput" placeholder='{"A": "1", "B": "00", "C": "01"}' style="height:60px;">{"A": "1", "B": "00", "C": "01"}</textarea>
+                </div>
+
+                <div class="stats-grid" style="margin-top:10px; margin-bottom:10px;">
+                    <div class="stat-card">
+                        <div style="color: var(--accent-purple); font-weight: bold; font-size: 12px;">Shannon Entropy</div>
+                        <div class="val" id="decoderEntropyVal">0.000</div>
+                        <div class="pct" id="decoderEntropyDesc">Bits per byte</div>
+                    </div>
+                    <div class="stat-card security">
+                        <div style="color: var(--status-red); font-weight: bold; font-size: 12px;">Malware Threat Index</div>
+                        <div class="val" id="decoderMalwareVal">LOW</div>
+                        <div class="pct" id="decoderMalwareDesc" style="color: var(--status-green);">Heuristic Checked</div>
+                    </div>
+                </div>
+
+                <button class="btn-action" style="margin-top:5px;" onclick="runDecoderPipeline()">🔓 Run Trace Extraction Pipeline</button>
+
+                <div id="decoderResultsArea" style="margin-top:15px; display:none;">
+                    <h3>🎉 Decompressed Restored Original Outputs</h3>
+                    <div class="output-box decoded-res" id="decompressedFinalTextOutput">Awaiting extraction execution parameters...</div>
+                </div>
+            </div>
+
+            <h3>💡 Live Execution Trace logs</h3>
+            <div class="log-terminal-box" id="executionTraceBox">
+                <h4>Pipeline logs monitoring terminal loaded...</h4>
+            </div>
+
+            <h3>Symbol Structural Mapping Index</h3>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr><th>Target Symbol Key</th><th>Occurrence Frequency</th><th>Prefix Path Weights</th></tr>
+                    </thead>
+                    <tbody id="codeTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3 id="treeTitleHeader">Visual Graph Tree Analysis</h3>
+            <div class="tree-container" id="treeContainer"></div>
+        </div>
+    </div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        let currentInterfaceTab = 'encoder';
+        let subModeType = 'text';
+        let localCacheDictionary = {};
+
+        class CustomDataNode {
+            constructor(symbolKey, frequency, leftChild = null, rightChild = null) {
+                this.symbolKey = symbolKey; 
+                this.frequency = frequency; 
+                this.leftChild = leftChild; 
+                this.rightChild = rightChild;
+            }
+        }
+
+        // New Export Functionality
+        function exportCurrentWorkAsZip() {
+            const zip = new JSZip();
+            const binaryData = document.getElementById('finalBinaryOutputStream').innerText;
+            const schemaData = document.getElementById('decoderJsonMapInput').value;
+            
+            if (!binaryData || !schemaData) {
+                alert("No compressed data found. Please run the encoder first.");
+                return;
+            }
+
+            zip.file("bitstream.txt", binaryData);
+            zip.file("schema.json", schemaData);
+
+            zip.generateAsync({type:"blob"}).then(function(content) {
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(content);
+                a.download = "compressed_archive.zip";
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                
+                document.getElementById('executionTraceBox').innerHTML += 
+                    `<div class="log-step-line" style="color:var(--status-green);">&bull; Success: .zip archive generated and downloaded.</div>`;
+            });
+        }
+
+        function toggleMainWorkspace(mode) {
+            currentInterfaceTab = mode;
+            document.querySelectorAll('.tab-btn').forEach((b, idx) => {
+                b.classList.toggle('active', (idx === 0 && mode === 'encoder') || (idx === 1 && mode === 'decoder'));
+            });
+            document.getElementById('encoderSection').style.display = (mode === 'encoder') ? 'block' : 'none';
+            document.getElementById('decoderSection').style.display = (mode === 'decoder') ? 'block' : 'none';
+            
+            if (mode === 'encoder') {
+                document.getElementById('treeTitleHeader').innerText = "Visual Graph Tree Analysis";
+                if(subModeType === 'text') runEncoderPipeline(); else runImageMatrixExtractor();
+            } else {
+                document.getElementById('treeTitleHeader').innerText = "Reconstructed Tree Structure Path Maps";
+                runDecoderPipeline();
+            }
+        }
+
+        function toggleEncoderSource(type) {
+            subModeType = type;
+            document.getElementById('encoderTextSource').style.display = (type === 'text') ? 'block' : 'none';
+            document.getElementById('encoderImageSource').style.display = (type === 'image') ? 'block' : 'none';
+            if (type === 'text') runEncoderPipeline(); else runImageMatrixExtractor();
+        }
+
+        function runEncoderPipeline() {
+            const rawTextPayload = document.getElementById('textInput').value;
+            if (!rawTextPayload) return;
+            let weightsMap = {}; let dataSequence = [];
+            for (let charElement of rawTextPayload) { 
+                weightsMap[charElement] = (weightsMap[charElement] || 0) + 1; 
+                dataSequence.push(charElement); 
+            }
+            executeProcessingCore(weightsMap, 'text', dataSequence);
+        }
+
+        function runImageMatrixExtractor() {
+            const assetFileSelector = document.getElementById('imageInput');
+            const visualPreviewer = document.getElementById('imagePreview');
+            if (!assetFileSelector.files[0]) return;
+            
+            document.getElementById('imgStatusText').innerText = `Loaded Image Asset Layout Matrix`;
+            const fileReaderStream = new FileReader();
+            fileReaderStream.onload = function(e) {
+                visualPreviewer.src = e.target.result; visualPreviewer.style.display = 'inline-block';
+                const imageContainer = new Image();
+                imageContainer.onload = function() {
+                    const renderingCanvas = document.getElementById('canvas'); 
+                    const drawingContext = renderingCanvas.getContext('2d');
+                    const downscaledBoundingLimit = 12; 
+                    renderingCanvas.width = downscaledBoundingLimit; 
+                    renderingCanvas.height = downscaledBoundingLimit;
+                    drawingContext.drawImage(imageContainer, 0, 0, downscaledBoundingLimit, downscaledBoundingLimit);
+                    
+                    const pixelsByteData = drawingContext.getImageData(0, 0, downscaledBoundingLimit, downscaledBoundingLimit).data;
+                    let weightsMap = {}; let dataSequence = [];
+                    for (let i = 0; i < pixelsByteData.length; i += 4) {
+                        let greyValueMetric = Math.round((pixelsByteData[i] + pixelsByteData[i+1] + pixelsByteData[i+2]) / 3);
+                        let lookupKey = `Px_${greyValueMetric}`;
+                        weightsMap[lookupKey] = (weightsMap[lookupKey] || 0) + 1; 
+                        dataSequence.push(lookupKey);
+                    }
+                    executeProcessingCore(weightsMap, 'image', dataSequence);
+                }
+                imageContainer.src = e.target.result;
+            }
+            fileReaderStream.readAsDataURL(assetFileSelector.files[0]);
+        }
+
+        function executeProcessingCore(weightsMap, parsingMode, dataSequence) {
+            const itemsLengthCount = dataSequence.length; 
+            const totalOriginalBitFootprint = itemsLengthCount * 8;
+            document.getElementById('origSize').innerText = totalOriginalBitFootprint;
+
+            let terminalDiagnosticsLog = `<h4>[Encoder Mode Execution Trace Log]</h4>`;
+            terminalDiagnosticsLog += `<div class="log-step-line"><strong>Step 1: Symbol Population Scan Matrix</strong></div>`;
+            Object.keys(weightsMap).forEach(k => {
+                let textKeyLabel = parsingMode === 'text' ? (k === ' ' ? 'Space' : k) : k.replace('Px_', 'Pixel Value ');
+                terminalDiagnosticsLog += `<div class="log-step-line"> &bull; Target Component Node Key [ ${textKeyLabel} ] frequency payload: ${weightsMap[k]}</div>`;
+            });
+
+            let trackingSequentialBitsSize = 0; let cursorPointerIndex = 0;
+            while (cursorPointerIndex < itemsLengthCount) {
+                while (cursorPointerIndex + 1 < itemsLengthCount && dataSequence[cursorPointerIndex] === dataSequence[cursorPointerIndex + 1]) { 
+                    cursorPointerIndex++; 
+                }
+                trackingSequentialBitsSize += 16; cursorPointerIndex++;
+            }
+            document.getElementById('seqBitsSize').innerText = `${trackingSequentialBitsSize} bits`;
+            document.getElementById('seqBitsRatio').innerText = `Saved ${(((totalOriginalBitFootprint - trackingSequentialBitsSize)/totalOriginalBitFootprint)*100).toFixed(1)}%`;
+
+            let nodesCollectionArray = Object.keys(weightsMap).map(k => new CustomDataNode(k, weightsMap[k]));
+            if (nodesCollectionArray.length === 1) {
+                nodesCollectionArray = [new CustomDataNode(null, nodesCollectionArray[0].frequency, nodesCollectionArray[0], null)];
+            }
+
+            while (nodesCollectionArray.length > 1) {
+                nodesCollectionArray.sort((a, b) => a.frequency - b.frequency);
+                let processingLeftNode = nodesCollectionArray.shift(); 
+                let processingRightNode = nodesCollectionArray.shift();
+                nodesCollectionArray.push(new CustomDataNode(null, processingLeftNode.frequency + processingRightNode.frequency, processingLeftNode, processingRightNode));
+            }
+
+            let computedPathPrefixCodes = {};
+            function computePrefixTreesPaths(currentNode, activeBitStringPath) {
+                if (!currentNode) return;
+                if (currentNode.symbolKey !== null) { 
+                    computedPathPrefixCodes[currentNode.symbolKey] = activeBitStringPath || "0"; 
+                    return; 
+                }
+                computePrefixTreesPaths(currentNode.leftChild, activeBitStringPath + "0"); 
+                computePrefixTreesPaths(currentNode.rightChild, activeBitStringPath + "1");
+            }
+            if (nodesCollectionArray.length > 0) {
+                computePrefixTreesPaths(nodesCollectionArray[0], "");
+            }
+            localCacheDictionary = computedPathPrefixCodes;
+
+            let compiledBinaryBitstreamOutput = "";
+            for (let trackingToken of dataSequence) {
+                compiledBinaryBitstreamOutput += computedPathPrefixCodes[trackingToken];
+            }
+
+            document.getElementById('finalBinaryOutputStream').innerText = compiledBinaryBitstreamOutput;
+            document.getElementById('treeBitsSize').innerText = `${compiledBinaryBitstreamOutput.length} bits`;
+            document.getElementById('treeBitsRatio').innerText = `Saved ${(((totalOriginalBitFootprint - compiledBinaryBitstreamOutput.length)/totalOriginalBitFootprint)*100).toFixed(1)}%`;
+
+            const codeTableBody = document.getElementById('codeTableBody');
+            codeTableBody.innerHTML = Object.keys(weightsMap).map(k => {
+                let visualizationTextLabel = parsingMode === 'text' ? (k === ' ' ? 'Space' : k) : `Pixel Value: ${k.split('_')[1]}`;
+                return `<tr><td><strong>${visualizationTextLabel}</strong></td><td>${weightsMap[k]}</td><td style="color:var(--accent-purple); font-family:monospace; font-weight:bold;">${computedPathPrefixCodes[k]}</td></tr>`;
+            }).join('');
+
+            document.getElementById('decoderBitstreamInput').value = compiledBinaryBitstreamOutput;
+            document.getElementById('decoderJsonMapInput').value = JSON.stringify(computedPathPrefixCodes);
+
+            terminalDiagnosticsLog += `<div class="log-step-line" style="color:var(--status-green); margin-top:8px;">&bull; Success: Optimization complete, output stream payload matches ${compiledBinaryBitstreamOutput.length} bits configurations limits.</div>`;
+            document.getElementById('executionTraceBox').innerHTML = terminalDiagnosticsLog;
+            document.getElementById('treeContainer').innerHTML = nodesCollectionArray.length > 0 ? `<div class="tree">${compileGraphicalViewTreeHTML(nodesCollectionArray[0])}</div>` : "";
+        }
+
+        function unpackArchiveHandler() {
+            const archiveFileInput = document.getElementById('zipInput');
+            const systemLabelIndicator = document.getElementById('zipStatusText');
+            if (!archiveFileInput.files[0]) return;
+
+            const selectedBlobPackage = archiveFileInput.files[0];
+            systemLabelIndicator.innerText = `Analyzing Packet: ${selectedBlobPackage.name}...`;
+
+            const streamFileReader = new FileReader();
+            streamFileReader.onload = function(e) {
+                JSZip.loadAsync(e.target.result).then(function(unpackedArchiveRoot) {
+                    let streamTargetTextFileEntry = null;
+                    let matrixSchemaJsonMapEntry = null;
+                    let automatedFallbackBackupFileEntry = null;
+
+                    unpackedArchiveRoot.forEach(function (path, currentArchiveEntry) {
+                        if (!currentArchiveEntry.dir && !automatedFallbackBackupFileEntry) {
+                            automatedFallbackBackupFileEntry = currentArchiveEntry;
+                        }
+                        if (currentArchiveEntry.name.toLowerCase().includes('bitstream') || (currentArchiveEntry.name.endsWith('.txt') && !currentArchiveEntry.name.includes('schema'))) {
+                            streamTargetTextFileEntry = currentArchiveEntry;
+                        }
+                        if (currentArchiveEntry.name.toLowerCase().includes('schema') || currentArchiveEntry.name.toLowerCase().includes('map') || currentArchiveEntry.name.endsWith('.json')) {
+                            matrixSchemaJsonMapEntry = currentArchiveEntry;
+                        }
+                    });
+
+                    if (streamTargetTextFileEntry && matrixSchemaJsonMapEntry) {
+                        Promise.all([streamTargetTextFileEntry.async("string"), matrixSchemaJsonMapEntry.async("string")]).then(function (extractedResultStrings) {
+                            document.getElementById('decoderBitstreamInput').value = extractedResultStrings[0].trim();
+                            document.getElementById('decoderJsonMapInput').value = extractedResultStrings[1].trim();
+                            systemLabelIndicator.innerHTML = `Loaded Match: <span style="color:var(--status-green); font-weight:bold;">${streamTargetTextFileEntry.name} (Bits Matrix Set Bound)</span>`;
+                            runDecoderPipeline();
+                        });
+                    } 
+                    else if (automatedFallbackBackupFileEntry) {
+                        systemLabelIndicator.innerHTML = `Parsing Arbitrary Asset File: <span style="color:var(--status-amber); font-weight:bold;">${automatedFallbackBackupFileEntry.name}</span> (Converting to Raw Bits...)`;
+                        
+                        automatedFallbackBackupFileEntry.async("uint8array").then(function (rawByteStreamArray) {
+                            let synthesizedBinaryStringStream = "";
+                            let dynamicConstructedDictionary = {};
+
+                            for(let i=0; i < rawByteStreamArray.length; i++) {
+                                let trackingByteValue = rawByteStreamArray[i];
+                                let standardAsciiCharToken = String.fromCharCode(trackingByteValue);
+                                let processed8BitBinaryRepresentationString = trackingByteValue.toString(2).padStart(8, '0');
+                                synthesizedBinaryStringStream += processed8BitBinaryRepresentationString;
+                                
+                                let safeDisplayStringTokenLabel = (trackingByteValue < 32 || trackingByteValue > 126) ? `HEX_0x${trackingByteValue.toString(16).toUpperCase()}` : standardAsciiCharToken;
+                                dynamicConstructedDictionary[safeDisplayStringTokenLabel] = processed8BitBinaryRepresentationString;
+                            }
+
+                            document.getElementById('decoderBitstreamInput').value = synthesizedBinaryStringStream;
+                            document.getElementById('decoderJsonMapInput').value = JSON.stringify(dynamicConstructedDictionary);
+                            runDecoderPipeline();
+                        });
+                    } else {
+                        systemLabelIndicator.innerText = "Empty file allocation structures boundaries isolated.";
+                    }
+                }).catch(function(err) {
+                    systemLabelIndicator.innerText = "Error parsing raw ZIP archive file headers parameters.";
+                });
+            };
+            streamFileReader.readAsArrayBuffer(selectedBlobPackage);
+        }
+
+        function calculateDecoderMetrics(binaryString, decodedArray) {
+            if (!binaryString || binaryString.length === 0) return { entropy: 0, threat: 'LOW', threatColor: 'var(--status-green)' };
+
+            let byteCounts = {};
+            let totalBytes = 0;
+            for (let i = 0; i < binaryString.length; i += 8) {
+                let byteStr = binaryString.substr(i, 8);
+                if (byteStr.length < 8) byteStr = byteStr.padEnd(8, '0');
+                byteCounts[byteStr] = (byteCounts[byteStr] || 0) + 1;
+                totalBytes++;
+            }
+
+            let shannonEntropy = 0;
+            for (let b in byteCounts) {
+                let frequencyProb = byteCounts[b] / totalBytes;
+                shannonEntropy -= frequencyProb * Math.log2(frequencyProb);
+            }
+
+            let threatScore = 0;
+            if (shannonEntropy > 7.2) threatScore += 40;
+            else if (shannonEntropy > 6.0) threatScore += 15;
+
+            let rawContentString = decodedArray.join('');
+            if (rawContentString.includes('EXE') || rawContentString.includes('ELF') || rawContentString.includes('MZ')) threatScore += 35;
+            if (rawContentString.includes('cmd.exe') || rawContentString.includes('/bin/sh') || rawContentString.includes('powershell')) threatScore += 45;
+            
+            if (binaryString.length > 5000 && shannonEntropy > 7.8) threatScore += 20;
+
+            let threatLabel = 'LOW';
+            let threatColor = 'var(--status-green)';
+            if (threatScore >= 60) {
+                threatLabel = 'CRITICAL RISK';
+                threatColor = 'var(--status-red)';
+            } else if (threatScore >= 25) {
+                threatLabel = 'SUSPICIOUS / MEDIUM';
+                threatColor = 'var(--status-amber)';
+            }
+
+            return {
+                entropy: shannonEntropy.toFixed(3),
+                threat: threatLabel,
+                threatColor: threatColor
+            };
+        }
+
+        function runDecoderPipeline() {
+            const trackingBinaryStringBits = document.getElementById('decoderBitstreamInput').value.trim();
+            const configurationJsonSchemaString = document.getElementById('decoderJsonMapInput').value.trim();
+            const outputTextFieldContainer = document.getElementById('decompressedFinalTextOutput');
+            const hiddenStatusResultsBlockArea = document.getElementById('decoderResultsArea');
+
+            if (!trackingBinaryStringBits || !configurationJsonSchemaString) return;
+
+            try {
+                const schemaParsingObject = JSON.parse(configurationJsonSchemaString);
+                let logicalTracerFeedbackOutput = `<h4>[Decoder Pipeline Operational Trace Log]</h4>`;
+                logicalTracerFeedbackOutput += `<div class="log-step-line"><strong>Step 1: Rebuilding Structural Tree Graph Paths...</strong></div>`;
+
+                let rootDirectoryMockNode = new CustomDataNode(null, 0);
+                for (let [characterKey, characterBinaryPath] of Object.entries(schemaParsingObject)) {
+                    let internalBrowserPointer = rootDirectoryMockNode;
+                    for (let bitElement of characterBinaryPath) {
+                        if (bitElement === '0') {
+                            if (!internalBrowserPointer.leftChild) internalBrowserPointer.leftChild = new CustomDataNode(null, 0);
+                            internalBrowserPointer = internalBrowserPointer.leftChild;
+                        } else {
+                            if (!internalBrowserPointer.rightChild) internalBrowserPointer.rightChild = new CustomDataNode(null, 0);
+                            internalBrowserPointer = internalBrowserPointer.rightChild;
+                        }
+                    }
+                    internalBrowserPointer.symbolKey = characterKey; 
+                }
+
+                logicalTracerFeedbackOutput += `<div class="log-step-line" style="color:var(--status-amber); margin-top:5px;"><strong>Step 2: Processing Bitstream Traversal Matrix...</strong></div>`;
+                
+                let compiledExtractedTextOutputsArray = [];
+                let logicProcessingTrackingPointer = rootDirectoryMockNode;
+                let calculatedBitsCounter = 0;
+
+                for (let singularBit of trackingBinaryStringBits) {
+                    if (singularBit === '0') {
+                        if(logicProcessingTrackingPointer.leftChild) logicProcessingTrackingPointer = logicProcessingTrackingPointer.leftChild;
+                    } else {
+                        if(logicProcessingTrackingPointer.rightChild) logicProcessingTrackingPointer = logicProcessingTrackingPointer.rightChild;
+                    }
+                    calculatedBitsCounter++;
+
+                    if (logicProcessingTrackingPointer && logicProcessingTrackingPointer.symbolKey !== null) {
+                        compiledExtractedTextOutputsArray.push(logicProcessingTrackingPointer.symbolKey);
+                        logicProcessingTrackingPointer = rootDirectoryMockNode; 
+                    }
+                }
+
+                const analysisMetrics = calculateDecoderMetrics(trackingBinaryStringBits, compiledExtractedTextOutputsArray);
+                document.getElementById('decoderEntropyVal').innerText = analysisMetrics.entropy;
+                document.getElementById('decoderMalwareVal').innerText = analysisMetrics.threat;
+                document.getElementById('decoderMalwareDesc').style.color = analysisMetrics.threatColor;
+                document.getElementById('decoderMalwareDesc').innerText = `Danger Level Evaluation Verified`;
+
+                let humanizedStringFormatFormattingPrint = "";
+                if (compiledExtractedTextOutputsArray.length > 0 && compiledExtractedTextOutputsArray[0].includes('Px_')) {
+                    humanizedStringFormatFormattingPrint = `[Extracted Original Pixel Matrix Stream Grids Output]\n` + compiledExtractedTextOutputsArray.map(p => p.split('_')[1]).join(', ');
+                } else {
+                    humanizedStringFormatFormattingPrint = compiledExtractedTextOutputsArray.map(tokenValueItem => {
+                        if(tokenValueItem.startsWith('HEX_0x')) {
+                            let convertedIntegerDecimalRepresentation = parseInt(tokenValueItem.split('0x')[1], 16);
+                            return (convertedIntegerDecimalRepresentation === 10 || convertedIntegerDecimalRepresentation === 13) ? "\n" : `[0x${tokenValueItem.split('0x')[1]}]`;
+                        }
+                        return tokenValueItem;
+                    }).join('');
+                }
+
+                outputTextFieldContainer.innerText = humanizedStringFormatFormattingPrint;
+                hiddenStatusResultsBlockArea.style.display = 'block';
+                
+                logicalTracerFeedbackOutput += `<div class="log-step-line" style="color:var(--accent-blue); margin-top:5px;"><strong>Inspection Complete:</strong> Shannon entropy rate is ${analysisMetrics.entropy}. Structural signatures classified threat severity as ${analysisMetrics.threat}.</div>`;
+                document.getElementById('executionTraceBox').innerHTML = logicalTracerFeedbackOutput;
+                document.getElementById('treeContainer').innerHTML = `<div class="tree">${compileGraphicalViewTreeHTML(rootDirectoryMockNode)}</div>`;
+
+            } catch (err) {
+                outputTextFieldContainer.innerText = "System parameters data verification matching constraints schema syntax exceptions occurred.";
+                hiddenStatusResultsBlockArea.style.display = 'block';
+            }
+        }
+
+        function compileGraphicalViewTreeHTML(targetStructuralNode, visualEdgeBitDirectionLabel = "") {
+            if (!targetStructuralNode) return "";
+            
+            let confirmationNodeLeafStatus = targetStructuralNode.symbolKey !== null;
+            let nodeHTML = "";
+            
+            if (confirmationNodeLeafStatus) {
+                let displayLabel = targetStructuralNode.symbolKey.includes('Px_') ? `Px: ${targetStructuralNode.symbolKey.split('_')[1]}` : (targetStructuralNode.symbolKey === ' ' ? 'Space' : targetStructuralNode.symbolKey);
+                nodeHTML = `<div class="node leaf">
+                    <div class="label">${displayLabel}</div>
+                    <div class="freq">${targetStructuralNode.frequency || ''}</div>
+                </div>`;
+            } else {
+                nodeHTML = `<div class="node">
+                    <div class="label">Internal</div>
+                    <div class="freq">${targetStructuralNode.frequency || ''}</div>
+                </div>`;
+            }
+
+            let edgeLabelHTML = visualEdgeBitDirectionLabel !== "" ? `<div class="edge-label">${visualEdgeBitDirectionLabel}</div>` : "";
+
+            let childrenHTML = "";
+            if (targetStructuralNode.leftChild || targetStructuralNode.rightChild) {
+                childrenHTML = `<ul>
+                    ${targetStructuralNode.leftChild ? compileGraphicalViewTreeHTML(targetStructuralNode.leftChild, "0") : ""}
+                    ${targetStructuralNode.rightChild ? compileGraphicalViewTreeHTML(targetStructuralNode.rightChild, "1") : ""}
+                </ul>`;
+            }
+
+            return `<li>
+                ${edgeLabelHTML}
+                ${nodeHTML}
+                ${childrenHTML}
+            </li>`;
+        }
+
+        const sliderContainer = document.getElementById('treeContainer');
+        let interfaceIsMouseDown = false;
+        let originalStartingXCoord;
+        let originalStartingYCoord;
+        let leftScrollPositionOffset;
+        let topScrollPositionOffset;
+
+        sliderContainer.addEventListener('mousedown', (e) => {
+            interfaceIsMouseDown = true;
+            originalStartingXCoord = e.pageX - sliderContainer.offsetLeft;
+            originalStartingYCoord = e.pageY - sliderContainer.offsetTop;
+            leftScrollPositionOffset = sliderContainer.scrollLeft;
+            topScrollPositionOffset = sliderContainer.scrollTop;
+        });
+
+        sliderContainer.addEventListener('mouseleave', () => { interfaceIsMouseDown = false; });
+        sliderContainer.addEventListener('mouseup', () => { interfaceIsMouseDown = false; });
+
+        sliderContainer.addEventListener('mousemove', (e) => {
+            if (!interfaceIsMouseDown) return;
+            e.preventDefault();
+            const currentCursorX = e.pageX - sliderContainer.offsetLeft;
+            const currentCursorY = e.pageY - sliderContainer.offsetTop;
+            const horizontalTravelDistance = (currentCursorX - originalStartingXCoord) * 1.5; 
+            const verticalTravelDistance = (currentCursorY - originalStartingYCoord) * 1.5;
+            sliderContainer.scrollLeft = leftScrollPositionOffset - horizontalTravelDistance;
+            sliderContainer.scrollTop = topScrollPositionOffset - verticalTravelDistance;
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            runEncoderPipeline();
+        });
+    </script>
+</body>
+</html>
